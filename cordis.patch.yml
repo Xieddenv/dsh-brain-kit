@@ -1,0 +1,21 @@
+# dsh-brain-kit 的装配入口（bundle patch）
+#
+# 由 profile 的 package.json → dsh.profile.bundles 引入；
+# id 只用于 Loader 定位，插件行为由下面的 config 决定。
+#
+# ⚠ name 必须加引号：YAML 里以 @ 开头的裸标量是非法的（@ 是保留指示符），
+#   不加引号会让整个 patch 解析失败 → 插件 entry 静默消失。
+- insert:
+    - id: brain-kit
+      name: "dsh-brain-kit"
+      config:
+        # auto = 运行期探测；也可强制 force-l0 / force-l1 / force-l2（调试用）
+        policy: auto
+        # 留空 = 用 DSH 进程的当前目录。想锁定某个工作区就填绝对路径。
+        workspace: ''
+        # 留空 = <workspace>/.dsh-brain-state.json
+        statePath: ''
+        # L2 首次启动打印安全警告（按版本去重）
+        warn: true
+        # 只允许写工作区内（guard 仍会拦系统目录 / 敏感文件）
+        restrictToWorkspace: true
