@@ -1,0 +1,31 @@
+{
+  "name": "dsh-brain-kit",
+  "version": "0.1.0",
+  "description": "知识库自动维护插件（权限自适应：L2 自动改写 / L1 建议模式 / L0 只读）",
+  "type": "module",
+  "main": "./lib/index.js",
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "dsh": ">=0.2.0-rc.2 <0.3.0",
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node test/smoke.mjs",
+    "smoke": "node test/smoke.mjs"
+  },
+  "files": [
+    "lib",
+    "test",
+    "cordis.patch.yml",
+    "install.ps1",
+    "install.cmd",
+    "uninstall.cmd",
+    "README.md",
+    "LICENSE"
+  ]
+}
