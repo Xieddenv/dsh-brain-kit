@@ -1,7 +1,7 @@
 {
   "name": "dsh-brain-kit",
-  "version": "0.1.0",
-  "description": "知识库自动维护插件（权限自适应：L2 自动改写 / L1 建议模式 / L0 只读）",
+  "version": "0.1.1",
+  "description": "给 AI 编程戴上安全帽：L0 到 L2 分级拦截，权限不够就不落盘，改给你一份可直接粘贴的替换稿。",
   "type": "module",
   "main": "./lib/index.js",
   "license": "MIT",
