@@ -11,11 +11,14 @@
       config:
         # auto = 运行期探测；也可强制 force-l0 / force-l1 / force-l2（调试用）
         policy: auto
-        # 留空 = 用 DSH 进程的当前目录。想锁定某个工作区就填绝对路径。
+        # ⚠️ 必填：留空会回落到 DSH 进程的 cwd（通常是 …\.dsh\profiles\desktop），
+        # 相对路径就会写到那里，不是你的项目目录。填这个项目的绝对路径。
         workspace: ''
         # 留空 = <workspace>/.dsh-brain-state.json
         statePath: ''
         # L2 首次启动打印安全警告（按版本去重）
         warn: true
+        # 工作区里缺 README.md / METHODOLOGY.md 时补一份空骨架（只补缺，绝不覆盖）
+        scaffold: false
         # 只允许写工作区内（guard 仍会拦系统目录 / 敏感文件）
         restrictToWorkspace: true
