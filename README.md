@@ -159,16 +159,27 @@ uninstall.cmd -Purge
   "parameters": {
     "type": "object",
     "properties": {
-      "path":    { "type": "string", "description": "工作区内相对路径或绝对路径" },
-      "content": { "type": "string", "description": "完整文件内容（整篇覆盖，不是补丁）" },
-      "reason":  { "type": "string", "description": "可选：为什么改" }
+      "path":           { "type": "string",  "description": "工作区内相对路径或绝对路径" },
+      "anchor":         { "type": "string",  "description": "要定位的唯一原文片段（优先用这个）" },
+      "replacement":    { "type": "string",  "description": "用 anchor 定位后替换成的新文本" },
+      "content":        { "type": "string",  "description": "整篇覆盖时用；与 anchor 二选一" },
+      "expectedSha256": { "type": "string",  "description": "读到文件时的 sha256；不符则 conflict，不覆盖" },
+      "reason":         { "type": "string",  "description": "可选：为什么改" }
     },
-    "required": ["path", "content"],
+    "required": ["path"],
     "additionalProperties": false
   }
 }
 ```
 
+**两种改法，优先用第一种**：
+
+| 改法 | 参数 | 适用 |
+|---|---|---|
+| **锚点替换** | `anchor` + `replacement` | 改一小段。anchor 必须在文件里**唯一**，0 次或多次都直接拒绝 |
+| 整篇覆盖 | `content` | 只有确实要重写全文时才用 |
+
+`expectedSha256` 是**乐观锁**：带上它，文件在你读取后被别人改过 → 返回 `conflict`，一个字节都不写。
 **返回（L2 成功）**
 
 ```json
@@ -206,7 +217,8 @@ uninstall.cmd -Purge
 | **`workspace`（必填）** | **无默认** | 工作区绝对路径。**不填会回落到 DSH 进程的 cwd——通常是 `…\.dsh\profiles\desktop`，相对路径就落到那儿，不是你的项目目录。** |
 | `statePath` | `<workspace>/.dsh-brain-state.json` | 记住「警告过哪个版本」 |
 | `warn` | `true` | L2 首次启动打印安全警告 |
-| `restrictToWorkspace` | `true` | 只允许写工作区内 |
+| estrictToWorkspace | `true` | 只允许写工作区内 |
+| scaffold | `false` | 工作区缺 `README.md` / `METHODOLOGY.md` 时补一份**空骨架**（只补缺，绝不覆盖已有文件） |
 
 ---
 
@@ -222,7 +234,7 @@ uninstall.cmd -Purge
 
 - [ ] **0.1.1：默认获取 DSH 的 workspace 服务**（`ctx.get('workspace')`），避免相对路径回落到 profile 目录。0.1.0 期间 `workspace` 必须手工填。
 - [ ] **0.1.1：分级改为读取 DSH 的 `permission` 服务**，让 L0/L1/L2 与宿主策略一致，而不是靠写探针猜 OS 权限。
-- [ ] **多会话写互斥**：两个 DSH 会话同时改同一份文档时，目前没有锁，后写的会覆盖先写的。计划用 `.lock` 文件 + 乐观锁。
+- [x] **多会话写互斥（乐观锁部分）**：0.1.2 起支持 `expectedSha256`，冲突时返回 `conflict` 而不是覆盖。仍需 `.lock` 解决"同时写入"的极小窗口。
 - [ ] **知识库自检**：检查引用是否悬空、条目是否过期。目前靠人工/外部流程。
 - [ ] **异步写入队列**：`safeWriteAsync` 现在只是同步版的别名。
 
