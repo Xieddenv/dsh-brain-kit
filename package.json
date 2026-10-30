@@ -1,7 +1,7 @@
 {
   "name": "dsh-brain-kit",
-  "version": "0.1.2",
-  "description": "给 AI 编程戴上安全帽：L0 到 L2 分级拦截，权限不够就不落盘，改给你一份可直接粘贴的替换稿。",
+  "version": "0.1.3",
+  "description": "给 AI 编程戴上安全帽：安全文件写入 + OS 权限探测。L0 到 L2 分级拦截，权限不够就不落盘，改给你一份可直接粘贴的替换稿。",
   "type": "module",
   "main": "./lib/index.js",
   "license": "MIT",
@@ -26,6 +26,7 @@
     "install.cmd",
     "uninstall.cmd",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ]
 }
