@@ -135,11 +135,11 @@ await t('L2: 首次写入成功，不产生 .bak', () => {
   assert.equal(r.backup, null);
   assert.equal(readFileSync(fA, 'utf8'), '# v1\n');
 });
-await t('L2: 二次写入生成 .bak，且 .bak 是旧版', () => {
+await t('L2: 二次写入生成带时间戳的 .bak，内容是旧版', () => {
   const r = safeWrite(fA, '# v2\n', { level: LEVEL.FULL });
   assert.equal(r.status, WRITE_STATUS.WRITTEN);
-  assert.equal(r.backup, fA + '.bak');
-  assert.equal(readFileSync(fA + '.bak', 'utf8'), '# v1\n');
+  assert.match(r.backup, /\.bak-\d{8}-\d{6}(-\d+)?$/, '备份名必须带时间戳');
+  assert.equal(readFileSync(r.backup, 'utf8'), '# v1\n');
   assert.equal(readFileSync(fA, 'utf8'), '# v2\n');
 });
 await t('L1: 一个字都不写，返回 fallback 结构与建议', () => {
@@ -585,6 +585,74 @@ await t('workspace 未配置时返回 workspaceConfigured=false', () => {
 });
 
 rmSync(ws5, { recursive: true, force: true });
+
+// ── 12. CRLF 容错 + 滚动备份 ──────────────────────────────────
+const ws8 = mkdtempSync(path.join(os.tmpdir(), 'brain-crlf-'));
+
+await t('CRLF 文件 + LF anchor → 命中，且其余行尾仍是 CRLF', () => {
+  const f = path.join(ws8, 'a.md');
+  writeFileSync(f, 'line1\r\nline2\r\nline3\r\n', 'utf8');
+  const tool = createTool({ workspace: ws8, policy: 'force-l2' });
+  const out = tool.execute({ path: 'a.md', anchor: 'line2\n', replacement: 'CHANGED\n' });
+  assert.equal(out.status, 'written');
+  const got = rf(f, 'utf8');
+  assert.ok(got.startsWith('line1\r\n'), '第一行行尾必须仍是 CRLF');
+  assert.ok(got.endsWith('line3\r\n'), '最后一行行尾必须仍是 CRLF');
+  assert.ok(got.includes('CHANGED'), '锚点内容应被替换');
+  assert.ok(!got.includes('line2'), '旧内容应被替换掉');
+});
+
+await t('CRLF 文件 + CRLF anchor（模型粘的是 CRLF）→ 命中', () => {
+  const f = path.join(ws8, 'b.md');
+  writeFileSync(f, 'aaa\r\nbbb\r\nccc\r\n', 'utf8');
+  const tool = createTool({ workspace: ws8, policy: 'force-l2' });
+  const out = tool.execute({ path: 'b.md', anchor: 'bbb\r\n', replacement: 'B2\r\n' });
+  assert.equal(out.status, 'written');
+  assert.ok(rf(f, 'utf8').includes('B2'));
+});
+
+await t('LF 文件 + CRLF anchor → 命中', () => {
+  const f = path.join(ws8, 'c.md');
+  writeFileSync(f, 'aaa\nbbb\nccc\n', 'utf8');
+  const tool = createTool({ workspace: ws8, policy: 'force-l2' });
+  const out = tool.execute({ path: 'c.md', anchor: 'bbb\r\n', replacement: 'B3\n' });
+  assert.equal(out.status, 'written');
+  assert.ok(rf(f, 'utf8').includes('B3'));
+});
+
+await t('CRLF 文件里 anchor 重复 → 仍然是 ANCHOR_AMBIGUOUS', () => {
+  const f = path.join(ws8, 'd.md');
+  writeFileSync(f, 'x\r\ny\r\nx\r\ny\r\n', 'utf8');
+  const tool = createTool({ workspace: ws8, policy: 'force-l2' });
+  const out = tool.execute({ path: 'd.md', anchor: 'x\ny\n', replacement: 'z' });
+  assert.equal(out.code, 'ANCHOR_AMBIGUOUS');
+  assert.equal(rf(f, 'utf8'), 'x\r\ny\r\nx\r\ny\r\n', '冲突时文件一个字节都不能动');
+});
+
+await t('滚动备份：连续三次写入留下两份不同的 .bak', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'brain-bak-'));
+  const f = path.join(dir, 'doc.md');
+  const r1 = safeWrite(f, 'v1', { level: LEVEL.FULL });
+  const r2 = safeWrite(f, 'v2', { level: LEVEL.FULL });
+  const r3 = safeWrite(f, 'v3', { level: LEVEL.FULL });
+  assert.equal(r1.backup, null, '首次没有原件，不该有备份');
+  assert.ok(r2.backup && r3.backup);
+  assert.notEqual(r2.backup, r3.backup, '两次备份必须是不同文件');
+  assert.equal(rf(r2.backup, 'utf8'), 'v1');
+  assert.equal(rf(r3.backup, 'utf8'), 'v2');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+await t('expectedSha256 仍按原文计算（不受 CRLF 归一化影响）', () => {
+  const f = path.join(ws8, 'e.md');
+  const orig = 'a\r\nb\r\n';
+  writeFileSync(f, orig, 'utf8');
+  const tool = createTool({ workspace: ws8, policy: 'force-l2' });
+  const out = tool.execute({ path: 'e.md', anchor: 'b\n', replacement: 'B\n', expectedSha256: pluginModule.sha256(orig) });
+  assert.equal(out.status, 'written', '按原文算的哈希必须匹配');
+});
+
+rmSync(ws8, { recursive: true, force: true });
 
 // ── 输出 ──────────────────────────────────────────────────────
 console.log('');
