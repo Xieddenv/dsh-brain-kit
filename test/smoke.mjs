@@ -14,6 +14,7 @@ import {
   parsePolicy, levelFrom, detectSync, detect, current, invalidate, summary,
 } from '../lib/permission.js';
 import { safeWrite, classifyWriteError, WRITE_STATUS, WriteError, ReadonlyError } from '../lib/writer.js';
+import { readFileSync as rf } from 'node:fs';
 import {
   check, FORBIDDEN_CODE, containsTraversal, realpathLoose, systemRoots,
 } from '../lib/guard.js';
@@ -238,7 +239,7 @@ await t('工具 Schema 必需字段正确', () => {
   const ctx = fakeCtx();
   apply(ctx, { workspace: ws2, policy: 'force-l2', statePath: path.join(ws2, '.state.json'), warn: false });
   const schema = ctx.registered[0].parameters;
-  assert.deepEqual(schema.required, ['path', 'content']);
+  assert.deepEqual(schema.required, ['path'], 'content/anchor 二选一，required 只留 path');
   assert.equal(schema.additionalProperties, false);
   assert.ok(schema.properties.path);
   assert.ok(schema.properties.content);
@@ -491,6 +492,100 @@ await t('Schema 合规: 不允许 type 数组（DSH 只收单类型字符串）'
   walk(TOOL_OUTPUT, 'output');
   assert.deepEqual(bad, [], bad.join('; '));
 });
+// ── 11. 0.1.2：VERSION 同步 / 乐观锁 / 锚点替换 / 骨架 ──────────
+const ws5 = mkdtempSync(path.join(os.tmpdir(), 'brain-v12-'));
+
+await t('VERSION 与 package.json 一致（防双源漂移）', () => {
+  const pkg = JSON.parse(rf(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(pluginModule.VERSION, pkg.version, `index.js VERSION=${pluginModule.VERSION} 但 package.json=${pkg.version}`);
+});
+
+await t('锚点替换：只改一处，其余原样', () => {
+  const f = path.join(ws5, 'a.md');
+  const orig = '# T\n\nAAA\n中间\nBBB\n';
+  writeFileSync(f, orig, 'utf8');
+  const tool = createTool({ workspace: ws5, policy: 'force-l2' });
+  const out = tool.execute({ path: 'a.md', anchor: 'BBB', replacement: 'CCC' });
+  assert.equal(out.status, 'written');
+  assert.equal(out.mode, 'anchor');
+  assert.equal(rf(f, 'utf8'), '# T\n\nAAA\n中间\nCCC\n');
+});
+
+await t('锚点找不到 → ANCHOR_NOT_FOUND，文件不动', () => {
+  const f = path.join(ws5, 'b.md');
+  writeFileSync(f, 'hello', 'utf8');
+  const tool = createTool({ workspace: ws5, policy: 'force-l2' });
+  const out = tool.execute({ path: 'b.md', anchor: 'NOPE', replacement: 'x' });
+  assert.equal(out.code, 'ANCHOR_NOT_FOUND');
+  assert.equal(rf(f, 'utf8'), 'hello');
+});
+
+await t('锚点不唯一 → ANCHOR_AMBIGUOUS，文件不动', () => {
+  const f = path.join(ws5, 'c.md');
+  writeFileSync(f, 'x\nx\n', 'utf8');
+  const tool = createTool({ workspace: ws5, policy: 'force-l2' });
+  const out = tool.execute({ path: 'c.md', anchor: 'x', replacement: 'y' });
+  assert.equal(out.code, 'ANCHOR_AMBIGUOUS');
+  assert.equal(rf(f, 'utf8'), 'x\nx\n');
+});
+
+await t('expectedSha256 不匹配 → conflict，绝不覆盖', () => {
+  const f = path.join(ws5, 'd.md');
+  writeFileSync(f, 'current', 'utf8');
+  const tool = createTool({ workspace: ws5, policy: 'force-l2' });
+  const out = tool.execute({ path: 'd.md', content: 'mine', expectedSha256: 'deadbeef' });
+  assert.equal(out.status, 'conflict');
+  assert.equal(out.expected, 'deadbeef');
+  assert.equal(out.actual.length, 64);
+  assert.equal(rf(f, 'utf8'), 'current');
+});
+
+await t('expectedSha256 匹配 → 正常写入并回传新哈希', () => {
+  const f = path.join(ws5, 'e.md');
+  writeFileSync(f, 'v1', 'utf8');
+  const tool = createTool({ workspace: ws5, policy: 'force-l2' });
+  const sha1 = tool.execute({ path: 'e.md', content: 'v2', expectedSha256: pluginModule.sha256('v1') });
+  assert.equal(sha1.status, 'written');
+  assert.equal(sha1.sha256, pluginModule.sha256('v2'));
+  assert.equal(rf(f, 'utf8'), 'v2');
+});
+
+await t('既没 content 也没 anchor → BAD_ARGS', () => {
+  const tool = createTool({ workspace: ws5, policy: 'force-l2' });
+  assert.equal(tool.execute({ path: 'x.md' }).code, 'BAD_ARGS');
+});
+
+await t('scaffold: 缺文件才补，已有文件不动', () => {
+  const ws6 = mkdtempSync(path.join(os.tmpdir(), 'brain-scaf-'));
+  writeFileSync(path.join(ws6, 'README.md'), '# 我自己的\n', 'utf8');
+  const ctx = {
+    logger: () => ({ info() {}, warn() {}, error() {} }),
+    inject: (_d, fn) => fn({ tools: { register: () => {} } }),
+  };
+  const r = apply(ctx, { workspace: ws6, policy: 'force-l2', warn: false, scaffold: true, statePath: path.join(ws6, '.s.json') });
+  assert.deepEqual(r.scaffolded, ['METHODOLOGY.md']);
+  assert.equal(rf(path.join(ws6, 'README.md'), 'utf8'), '# 我自己的\n');
+  assert.ok(rf(path.join(ws6, 'METHODOLOGY.md'), 'utf8').includes('方法名称'));
+  rmSync(ws6, { recursive: true, force: true });
+});
+
+await t('scaffold 默认关闭', () => {
+  const ws7 = mkdtempSync(path.join(os.tmpdir(), 'brain-scaf0-'));
+  const ctx = { logger: () => ({ info() {}, warn() {}, error() {} }), inject: (_d, fn) => fn({ tools: { register: () => {} } }) };
+  const r = apply(ctx, { workspace: ws7, policy: 'force-l2', warn: false, statePath: path.join(ws7, '.s.json') });
+  assert.deepEqual(r.scaffolded, []);
+  assert.equal(existsSync(path.join(ws7, 'README.md')), false);
+  rmSync(ws7, { recursive: true, force: true });
+});
+
+await t('workspace 未配置时返回 workspaceConfigured=false', () => {
+  const ctx = { logger: () => ({ info() {}, warn() {}, error() {} }), inject: (_d, fn) => fn({ tools: { register: () => {} } }) };
+  const r = apply(ctx, { policy: 'force-l1', warn: false, statePath: path.join(os.tmpdir(), 'brain-x.json') });
+  assert.equal(r.workspaceConfigured, false);
+});
+
+rmSync(ws5, { recursive: true, force: true });
+
 // ── 输出 ──────────────────────────────────────────────────────
 console.log('');
 for (const line of results) console.log(line);
